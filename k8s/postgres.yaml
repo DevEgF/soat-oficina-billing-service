@@ -1,0 +1,111 @@
+# Banco exclusivo do OS Service. A senha é a mesma chave que a aplicação usa
+# (SPRING_DATASOURCE_PASSWORD do Secret billing-service-secrets).
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing-postgres
+  labels:
+    app.kubernetes.io/name: billing-postgres
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: billing-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: billing-postgres
+  labels:
+    app.kubernetes.io/name: billing-postgres
+    app.kubernetes.io/component: database
+spec:
+  serviceName: billing-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: billing-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: billing-postgres
+        app.kubernetes.io/component: database
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # Usuário postgres (uid/gid 70) da imagem alpine.
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16.15-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: billing
+            - name: POSTGRES_USER
+              value: billing
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: billing-service-secrets
+                  key: SPRING_DATASOURCE_PASSWORD
+            # Subdiretório evita conflito do initdb com o lost+found do volume.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "billing", "-d", "billing", "-h", "127.0.0.1"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "billing", "-d", "billing", "-h", "127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: billing-postgres
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
