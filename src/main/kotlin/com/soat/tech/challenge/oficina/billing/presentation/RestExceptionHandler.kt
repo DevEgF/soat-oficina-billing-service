@@ -6,6 +6,7 @@ import com.soat.tech.challenge.oficina.billing.domain.exception.NotFoundExceptio
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.HttpStatusCode
@@ -42,6 +43,10 @@ class RestExceptionHandler : ResponseEntityExceptionHandler() {
     @ExceptionHandler(DataIntegrityViolationException::class)
     fun dataIntegrityViolation(e: DataIntegrityViolationException) =
         response(HttpStatus.CONFLICT, "Data conflict: a record with this data already exists")
+
+    @ExceptionHandler(OptimisticLockingFailureException::class)
+    fun concurrentUpdate(e: OptimisticLockingFailureException) =
+        response(HttpStatus.CONFLICT, "Concurrent update: reload and try again")
 
     @ExceptionHandler(BadCredentialsException::class)
     fun unauthorized(e: BadCredentialsException) =

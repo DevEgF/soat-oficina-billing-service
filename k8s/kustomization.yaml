@@ -1,4 +1,4 @@
-# Base do OS Service no kind local. O deploy (scripts/deploy-kind.sh apply) cria um overlay
+# Base do Billing Service no kind local. O deploy (scripts/deploy-kind.sh apply) cria um overlay
 # temporário que fixa a tag da imagem; secret.example.yaml fica fora daqui de propósito.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

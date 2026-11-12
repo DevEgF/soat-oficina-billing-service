@@ -34,6 +34,8 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-amqp")
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")
 	implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+	// Jackson 3 (Spring Boot 4): Kotlin data classes in MVC bodies and in the message envelope.
+	implementation("tools.jackson.module:jackson-module-kotlin")
 	implementation("org.jetbrains.kotlin:kotlin-reflect")
 
 	// Persistence (PostgreSQL). The Execution service swaps this block for spring-boot-starter-data-mongodb.

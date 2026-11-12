@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.slf4j.MDC
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.mock.web.MockHttpServletRequest
@@ -65,6 +66,11 @@ class RestExceptionHandlerTest {
             handler.dataIntegrityViolation(DataIntegrityViolationException("duplicate key value cpf=123")),
             HttpStatus.CONFLICT,
             "Data conflict: a record with this data already exists",
+        )
+        assertResponse(
+            handler.concurrentUpdate(OptimisticLockingFailureException("version 3")),
+            HttpStatus.CONFLICT,
+            "Concurrent update: reload and try again",
         )
     }
 

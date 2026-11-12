@@ -5,9 +5,6 @@
 .kotlin
 .idea
 .vscode
-.claude
-.claude-flow
-.swarm
 build
 out
 k8s

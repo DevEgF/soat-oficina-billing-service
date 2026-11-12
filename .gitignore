@@ -20,11 +20,6 @@ out/
 .settings/
 bin/
 
-# Ferramentas de agente (criadas no diretório corrente)
-.claude/
-.claude-flow/
-.swarm/
-
 # Segredos locais (nunca versionar)
 .env
 .env.local
