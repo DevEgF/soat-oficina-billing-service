@@ -91,6 +91,8 @@ class QuoteEntity(
     var totalCents: Long = 0,
     @Column(name = "decision_reason", length = 500)
     var decisionReason: String? = null,
+    @Column(name = "cardholder_name", length = 100)
+    var cardholderName: String? = null,
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.EPOCH,
     @Column(name = "decided_at")

@@ -19,6 +19,10 @@ interface QuoteRepository {
 }
 
 interface PaymentRepository {
+    fun findById(id: UUID): Payment?
     fun findByWorkOrderId(workOrderId: UUID): Payment?
+
+    /** Pending payments, oldest first, for the periodic status check. */
+    fun findPending(): List<Payment>
     fun save(payment: Payment): Payment
 }

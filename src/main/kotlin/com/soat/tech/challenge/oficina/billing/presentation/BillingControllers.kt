@@ -43,12 +43,18 @@ class WorkOrderBillingController(
     @PostMapping("/quote/decision")
     @Operation(
         summary = "Registra a decisão do cliente",
-        description = "approved=true publica QuoteApproved; false publica QuoteRejected. Só a partir de PENDING_APPROVAL (senão 409).",
+        description = "approved=true publica QuoteApproved e guarda payment.cardholderName (opcional, padrão APRO) " +
+            "para o pagamento; false publica QuoteRejected. Só a partir de PENDING_APPROVAL (senão 409).",
     )
     fun decide(
         @PathVariable workOrderId: UUID,
         @Valid @RequestBody request: QuoteDecisionRequest,
-    ): QuoteResponse = quotes.decide(workOrderId, requireNotNull(request.approved), request.reason).toResponse()
+    ): QuoteResponse = quotes.decide(
+        workOrderId,
+        requireNotNull(request.approved),
+        request.reason,
+        request.payment?.cardholderName,
+    ).toResponse()
 
     @GetMapping("/payment")
     @Operation(summary = "Consulta o pagamento da OS (404 enquanto não existir)")

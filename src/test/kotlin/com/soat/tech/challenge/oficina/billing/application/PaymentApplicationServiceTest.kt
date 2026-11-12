@@ -4,6 +4,7 @@ import com.soat.tech.challenge.oficina.billing.application.messaging.EventPublis
 import com.soat.tech.challenge.oficina.billing.application.messaging.MessageType
 import com.soat.tech.challenge.oficina.billing.application.messaging.OutgoingEvent
 import com.soat.tech.challenge.oficina.billing.application.messaging.PaymentApprovedPayload
+import com.soat.tech.challenge.oficina.billing.application.messaging.PaymentRefundedPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.PaymentRejectedPayload
 import com.soat.tech.challenge.oficina.billing.domain.exception.NotFoundException
 import com.soat.tech.challenge.oficina.billing.domain.model.LineKind
@@ -15,6 +16,7 @@ import com.soat.tech.challenge.oficina.billing.domain.port.GatewayPayment
 import com.soat.tech.challenge.oficina.billing.domain.port.GatewayPaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentCreation
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentGateway
+import com.soat.tech.challenge.oficina.billing.domain.port.PaymentProviderException
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentRepository
 import com.soat.tech.challenge.oficina.billing.domain.port.QuoteRepository
 import io.mockk.every
@@ -37,7 +39,14 @@ class PaymentApplicationServiceTest {
     private val payments = mockk<PaymentRepository>()
     private val gateway = mockk<PaymentGateway>()
     private val events = mockk<EventPublisher>(relaxed = true)
-    private val service = PaymentApplicationService(quotes, payments, gateway, events, Clock.fixed(now, ZoneOffset.UTC))
+    private val service = PaymentApplicationService(
+        quotes,
+        payments,
+        gateway,
+        events,
+        Clock.fixed(now, ZoneOffset.UTC),
+        PaymentProperties(defaultCardholderName = "APRO"),
+    )
     private val workOrderId = UUID.randomUUID()
     private val quote = Quote.create(
         workOrderId = workOrderId,
@@ -64,7 +73,7 @@ class PaymentApplicationServiceTest {
 
     @Test
     fun `approved charge publishes PaymentApproved`() {
-        quote.approve(now)
+        quote.approve(now, "APRO")
         val creation = slot<PaymentCreation>()
         every { gateway.create(capture(creation)) } returns GatewayPayment("prov-1", GatewayPaymentStatus.APPROVED, "accredited")
 
@@ -78,6 +87,7 @@ class PaymentApplicationServiceTest {
         assertEquals("maria@example.com", creation.captured.payerEmail)
         assertEquals(12000, creation.captured.amountCents)
         assertEquals("Oficina - OS TRK-9", creation.captured.description)
+        assertEquals("APRO", creation.captured.cardholderName)
         assertEquals(MessageType.PAYMENT_APPROVED, event.captured.type)
         assertEquals("corr-saga", event.captured.correlationId)
         assertEquals(
@@ -165,5 +175,96 @@ class PaymentApplicationServiceTest {
         val payment = Payment.create(workOrderId, quote.id, 12000, "FAKE", "corr", now)
         every { payments.findByWorkOrderId(workOrderId) } returns payment
         assertEquals(payment, service.get(workOrderId))
+    }
+
+    @Test
+    fun `cardholder name of the approval reaches the gateway, default when absent`() {
+        val creation = slot<PaymentCreation>()
+        every { gateway.create(capture(creation)) } returns GatewayPayment("prov-1", GatewayPaymentStatus.PENDING)
+
+        quote.approve(now, "OTHE")
+        service.requestPayment(command())
+        assertEquals("OTHE", creation.captured.cardholderName)
+
+        val withoutName = Quote.create(workOrderId, "TRK", "Maria", null, "corr", quote.lines, now).apply { approve(now) }
+        every { quotes.findByWorkOrderId(workOrderId) } returns withoutName
+        service.requestPayment(command(quoteId = withoutName.id))
+        assertEquals("APRO", creation.captured.cardholderName)
+    }
+
+    private fun approvedPayment() = Payment.create(workOrderId, quote.id, 12000, "FAKE", "corr-saga", now).apply {
+        applyGatewayResult(GatewayPayment("prov-9", GatewayPaymentStatus.APPROVED, "accredited"), now)
+    }
+
+    @Test
+    fun `refund of an approved payment refunds at the provider and publishes PaymentRefunded`() {
+        val payment = approvedPayment()
+        every { payments.findByWorkOrderId(workOrderId) } returns payment
+        every { gateway.refund("prov-9", 12000) } returns GatewayPayment("prov-9", GatewayPaymentStatus.REFUNDED, "refunded")
+
+        service.refund(RefundPaymentCommand(workOrderId, payment.id, "ExecutionFailed"))
+
+        assertEquals(PaymentStatus.REFUNDED, saved.captured.status)
+        assertEquals("refunded", saved.captured.statusDetail)
+        assertEquals(MessageType.PAYMENT_REFUNDED, event.captured.type)
+        assertEquals("corr-saga", event.captured.correlationId)
+        assertEquals(PaymentRefundedPayload(workOrderId, payment.id), event.captured.payload)
+    }
+
+    @Test
+    fun `refund of a refunded payment confirms again without calling the provider`() {
+        val payment = approvedPayment().apply { markRefunded(now) }
+        every { payments.findByWorkOrderId(workOrderId) } returns payment
+
+        service.refund(RefundPaymentCommand(workOrderId, null, "ExecutionFailed"))
+
+        verify(exactly = 0) { gateway.refund(any(), any()) }
+        verify(exactly = 0) { payments.save(any()) }
+        assertEquals(PaymentRefundedPayload(workOrderId, payment.id), event.captured.payload)
+    }
+
+    @Test
+    fun `refund that does not apply is discarded`() {
+        // No payment.
+        service.refund(RefundPaymentCommand(workOrderId, UUID.randomUUID(), "x"))
+        // Another payment id.
+        every { payments.findByWorkOrderId(workOrderId) } returns approvedPayment()
+        service.refund(RefundPaymentCommand(workOrderId, UUID.randomUUID(), "x"))
+        // Pending and rejected payments.
+        every { payments.findByWorkOrderId(workOrderId) } returns Payment.create(workOrderId, quote.id, 12000, "FAKE", "c", now)
+        service.refund(RefundPaymentCommand(workOrderId, null, "x"))
+        every { payments.findByWorkOrderId(workOrderId) } returns
+            Payment.create(workOrderId, quote.id, 12000, "FAKE", "c", now).apply { rejectLocally("no", now) }
+        service.refund(RefundPaymentCommand(workOrderId, null, "x"))
+
+        verify(exactly = 0) { gateway.refund(any(), any()) }
+        verify(exactly = 0) { payments.save(any()) }
+        verify(exactly = 0) { events.publishAfterCommit(any()) }
+    }
+
+    @Test
+    fun `provider failure or unexpected answer on refund propagates for retry`() {
+        val payment = approvedPayment()
+        every { payments.findByWorkOrderId(workOrderId) } returns payment
+        every { gateway.refund(any(), any()) } throws PaymentProviderException("refund-order: HTTP 500")
+        assertFailsWith<PaymentProviderException> { service.refund(RefundPaymentCommand(workOrderId, null, "x")) }
+
+        every { gateway.refund(any(), any()) } returns GatewayPayment("prov-9", GatewayPaymentStatus.APPROVED)
+        assertFailsWith<PaymentProviderException> { service.refund(RefundPaymentCommand(workOrderId, null, "x")) }
+
+        val withoutProviderId = Payment(
+            UUID.randomUUID(), workOrderId, quote.id, 12000, "FAKE", "c", PaymentStatus.APPROVED, null, null, now, now,
+        )
+        every { payments.findByWorkOrderId(workOrderId) } returns withoutProviderId
+        assertFailsWith<PaymentProviderException> { service.refund(RefundPaymentCommand(workOrderId, null, "x")) }
+
+        assertEquals(PaymentStatus.APPROVED, payment.status)
+        verify(exactly = 0) { payments.save(any()) }
+        verify(exactly = 0) { events.publishAfterCommit(any()) }
+    }
+
+    @Test
+    fun `result event exists only for resolved payments`() {
+        assertFailsWith<IllegalStateException> { paymentResultEvent(Payment.create(workOrderId, quote.id, 1, "FAKE", "c", now)) }
     }
 }

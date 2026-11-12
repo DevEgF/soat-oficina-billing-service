@@ -35,6 +35,8 @@ class TestcontainersConfiguration {
         "app.environment=hml",
         "app.jwt.secret=${TestJwt.RAW_SECRET}",
         "app.payment.gateway=simulated",
+        // Short interval so the periodic check of pending payments resolves within a test.
+        "app.payment.status-check-interval=PT1S",
     ],
 )
 @ActiveProfiles("test")

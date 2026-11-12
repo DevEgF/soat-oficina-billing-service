@@ -4,6 +4,7 @@ import com.soat.tech.challenge.oficina.billing.application.messaging.EventPublis
 import com.soat.tech.challenge.oficina.billing.application.messaging.MessageType
 import com.soat.tech.challenge.oficina.billing.application.messaging.OutgoingEvent
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteApprovedPayload
+import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteCancelledPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteGeneratedPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteGenerationFailedPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteRejectedPayload
@@ -32,12 +33,20 @@ data class GenerateQuoteCommand(
     val correlationId: String,
 )
 
+data class CancelQuoteCommand(
+    val workOrderId: UUID,
+    /** Quote known by the orchestrator; when present it must match the quote of the work order. */
+    val quoteId: UUID?,
+    val reason: String?,
+)
+
 @Service
 class QuoteApplicationService(
     private val quotes: QuoteRepository,
     private val catalog: CatalogRepository,
     private val events: EventPublisher,
     private val clock: Clock,
+    private val paymentProperties: PaymentProperties,
 ) {
 
     /**
@@ -103,12 +112,15 @@ class QuoteApplicationService(
     @Transactional(readOnly = true)
     fun get(workOrderId: UUID): Quote = load(workOrderId)
 
-    /** Customer decision, only from PENDING_APPROVAL (otherwise InvalidStatusTransitionException, 409). */
+    /**
+     * Customer decision, only from PENDING_APPROVAL (otherwise InvalidStatusTransitionException, 409).
+     * An approval keeps the cardholder name (or the configured default) for the payment.
+     */
     @Transactional
-    fun decide(workOrderId: UUID, approved: Boolean, reason: String?): Quote {
+    fun decide(workOrderId: UUID, approved: Boolean, reason: String?, cardholderName: String? = null): Quote {
         val quote = load(workOrderId)
         val event = if (approved) {
-            quote.approve(now())
+            quote.approve(now(), cardholderName?.takeIf { it.isNotBlank() } ?: paymentProperties.defaultCardholderName)
             OutgoingEvent(
                 MessageType.QUOTE_APPROVED,
                 quote.workOrderId,
@@ -128,6 +140,41 @@ class QuoteApplicationService(
         log.info("quote.decided workOrderId={} quoteId={} status={}", saved.workOrderId, saved.id, saved.status)
         events.publishAfterCommit(event)
         return saved
+    }
+
+    /**
+     * CancelQuote (compensation): an open or approved quote goes to CANCELLED and QuoteCancelled is
+     * published. A quote already cancelled or rejected is left as is and QuoteCancelled is published
+     * again, because the orchestrator waits for that confirmation. An unknown quote is discarded.
+     */
+    @Transactional
+    fun cancel(command: CancelQuoteCommand) {
+        val quote = quotes.findByWorkOrderId(command.workOrderId)
+        if (quote == null || (command.quoteId != null && command.quoteId != quote.id)) {
+            log.warn(
+                "quote.cancel.ignored reason=quote-not-found workOrderId={} quoteId={}",
+                command.workOrderId, command.quoteId,
+            )
+            return
+        }
+        if (quote.isClosed) {
+            log.info(
+                "quote.cancel.confirmed-again workOrderId={} quoteId={} status={}",
+                quote.workOrderId, quote.id, quote.status,
+            )
+        } else {
+            quote.cancel(now(), command.reason)
+            quotes.save(quote)
+            log.info("quote.cancelled workOrderId={} quoteId={} reason={}", quote.workOrderId, quote.id, command.reason)
+        }
+        events.publishAfterCommit(
+            OutgoingEvent(
+                MessageType.QUOTE_CANCELLED,
+                quote.workOrderId,
+                quote.correlationId,
+                QuoteCancelledPayload(quote.workOrderId, quote.id),
+            ),
+        )
     }
 
     private fun load(workOrderId: UUID): Quote =

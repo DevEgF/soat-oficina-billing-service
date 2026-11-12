@@ -1,8 +1,10 @@
 package com.soat.tech.challenge.oficina.billing.infrastructure.messaging.handler
 
+import com.soat.tech.challenge.oficina.billing.application.CancelQuoteCommand
 import com.soat.tech.challenge.oficina.billing.application.GenerateQuoteCommand
 import com.soat.tech.challenge.oficina.billing.application.PaymentApplicationService
 import com.soat.tech.challenge.oficina.billing.application.QuoteApplicationService
+import com.soat.tech.challenge.oficina.billing.application.RefundPaymentCommand
 import com.soat.tech.challenge.oficina.billing.application.RequestPaymentCommand
 import com.soat.tech.challenge.oficina.billing.application.messaging.MessageType
 import com.soat.tech.challenge.oficina.billing.domain.model.RequestedItem
@@ -96,5 +98,50 @@ class CommandHandlersTest {
         }
         verify(exactly = 0) { quotes.generate(any()) }
         verify(exactly = 0) { payments.requestPayment(any()) }
+    }
+
+    @Test
+    fun `CancelQuote payload becomes the application command`() {
+        val handler = CancelQuoteHandler(codec, quotes)
+        val quoteId = UUID.randomUUID()
+
+        handler.handle(
+            envelope(
+                "CancelQuote",
+                mapOf("workOrderId" to workOrderId.toString(), "quoteId" to quoteId.toString(), "reason" to "ApprovalTimeout"),
+            ),
+        )
+        handler.handle(envelope("CancelQuote", mapOf("workOrderId" to workOrderId.toString())))
+
+        assertEquals(MessageType.CANCEL_QUOTE, handler.type)
+        verify { quotes.cancel(CancelQuoteCommand(workOrderId, quoteId, "ApprovalTimeout")) }
+        verify { quotes.cancel(CancelQuoteCommand(workOrderId, null, null)) }
+    }
+
+    @Test
+    fun `RefundPayment payload becomes the application command`() {
+        val handler = RefundPaymentHandler(codec, payments)
+        val paymentId = UUID.randomUUID()
+
+        handler.handle(
+            envelope(
+                "RefundPayment",
+                mapOf("workOrderId" to workOrderId.toString(), "paymentId" to paymentId.toString(), "reason" to "ExecutionFailed"),
+            ),
+        )
+
+        assertEquals(MessageType.REFUND_PAYMENT, handler.type)
+        verify { payments.refund(RefundPaymentCommand(workOrderId, paymentId, "ExecutionFailed")) }
+    }
+
+    @Test
+    fun `compensation commands of another saga or without work order are refused`() {
+        val other = mapOf("workOrderId" to UUID.randomUUID().toString(), "quoteId" to UUID.randomUUID().toString())
+        assertFailsWith<InvalidMessageException> { CancelQuoteHandler(codec, quotes).handle(envelope("CancelQuote", other)) }
+        assertFailsWith<InvalidMessageException> {
+            RefundPaymentHandler(codec, payments).handle(envelope("RefundPayment", mapOf("paymentId" to "x")))
+        }
+        verify(exactly = 0) { quotes.cancel(any()) }
+        verify(exactly = 0) { payments.refund(any()) }
     }
 }

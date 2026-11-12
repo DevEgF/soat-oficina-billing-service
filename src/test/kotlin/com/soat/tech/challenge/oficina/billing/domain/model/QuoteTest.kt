@@ -2,7 +2,9 @@ package com.soat.tech.challenge.oficina.billing.domain.model
 
 import com.soat.tech.challenge.oficina.billing.domain.exception.InvalidStatusTransitionException
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -90,6 +92,22 @@ class QuoteTest {
             assertEquals(QuoteStatus.APPROVED, quote.status)
             assertEquals(t0.plusSeconds(5), quote.decidedAt)
             assertEquals(t0.plusSeconds(5), quote.updatedAt)
+            assertNull(quote.cardholderName)
+        }
+
+        @Test
+        fun `approve keeps a trimmed cardholder name`() {
+            val quote = quote()
+            quote.approve(t0, "  APRO ")
+            assertEquals("APRO", quote.cardholderName)
+            assertFalse(quote.isClosed)
+        }
+
+        @Test
+        fun `cancelled and rejected quotes are closed`() {
+            assertTrue(quote().apply { cancel(t0, null) }.isClosed)
+            assertTrue(quote().apply { reject(t0, null) }.isClosed)
+            assertFalse(quote().apply { approve(t0) }.isClosed)
         }
 
         @Test

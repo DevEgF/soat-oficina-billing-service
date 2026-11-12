@@ -71,10 +71,11 @@ class Payment(
         updatedAt = now
     }
 
-    /** Saga compensation (RefundPayment). */
-    fun markRefunded(now: Instant) {
+    /** Saga compensation (RefundPayment), after the provider confirmed the refund. */
+    fun markRefunded(now: Instant, detail: String? = null) {
         requireStatus("refund", PaymentStatus.APPROVED)
         status = PaymentStatus.REFUNDED
+        detail?.let { statusDetail = it }
         updatedAt = now
     }
 

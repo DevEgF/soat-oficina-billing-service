@@ -3,6 +3,7 @@ package com.soat.tech.challenge.oficina.billing.infrastructure.persistence
 import com.soat.tech.challenge.oficina.billing.domain.model.CatalogPart
 import com.soat.tech.challenge.oficina.billing.domain.model.CatalogService
 import com.soat.tech.challenge.oficina.billing.domain.model.Payment
+import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.model.Quote
 import com.soat.tech.challenge.oficina.billing.domain.model.QuoteLine
 import com.soat.tech.challenge.oficina.billing.domain.port.CatalogRepository
@@ -59,6 +60,7 @@ class QuoteRepositoryAdapter(private val jpa: QuoteJpaRepository) : QuoteReposit
         entity.partsTotalCents = quote.partsTotalCents
         entity.totalCents = quote.totalCents
         entity.decisionReason = quote.decisionReason
+        entity.cardholderName = quote.cardholderName
         entity.createdAt = quote.createdAt
         entity.decidedAt = quote.decidedAt
         entity.updatedAt = quote.updatedAt
@@ -84,13 +86,19 @@ class QuoteRepositoryAdapter(private val jpa: QuoteJpaRepository) : QuoteReposit
         decidedAt = decidedAt,
         decisionReason = decisionReason,
         updatedAt = updatedAt,
+        cardholderName = cardholderName,
     )
 }
 
 @Repository
 class PaymentRepositoryAdapter(private val jpa: PaymentJpaRepository) : PaymentRepository {
 
+    override fun findById(id: UUID): Payment? = jpa.findById(id).orElse(null)?.toDomain()
+
     override fun findByWorkOrderId(workOrderId: UUID): Payment? = jpa.findByWorkOrderId(workOrderId)?.toDomain()
+
+    override fun findPending(): List<Payment> =
+        jpa.findAllByStatusOrderByCreatedAtAsc(PaymentStatus.PENDING).map { it.toDomain() }
 
     override fun save(payment: Payment): Payment {
         val entity = jpa.findById(payment.id).orElseGet { PaymentEntity(id = payment.id) }

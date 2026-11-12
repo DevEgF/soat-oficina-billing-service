@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component
  * Consumer of `billing.commands`. Decodes the envelope, puts the saga correlation id in the MDC
  * (same key as the CorrelationIdFilter) and dispatches by `type`:
  * - handled command: idempotent processing (processed_message in the effect's transaction);
- * - contract command not handled yet: WARN and ack;
+ * - contract command without a handler: WARN and ack;
  * - invalid JSON, type outside the contract or not a billing command: straight to the DLQ.
  * Any other failure is retried by the container (3 attempts) and then dead-lettered.
  */
@@ -38,7 +38,7 @@ class BillingCommandListener(
             val handler = handlers[type]
             if (handler == null) {
                 log.warn(
-                    "message.ignored reason=not-handled-yet type={} sagaId={} messageId={}",
+                    "message.ignored reason=no-handler type={} sagaId={} messageId={}",
                     envelope.type, envelope.sagaId, envelope.messageId,
                 )
                 return@withMdc
