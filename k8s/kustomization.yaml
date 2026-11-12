@@ -1,0 +1,17 @@
+# Base do OS Service no kind local. O deploy (scripts/deploy-kind.sh apply) cria um overlay
+# temporário que fixa a tag da imagem; secret.example.yaml fica fora daqui de propósito.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: oficina
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: oficina
+      app.kubernetes.io/managed-by: kustomize
+    # Seletores são imutáveis: rótulos comuns entram só em metadata e nos templates dos pods.
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - configmap.yaml
+  - postgres.yaml
+  - deployment.yaml
+  - service.yaml

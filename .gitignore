@@ -1,0 +1,35 @@
+# Gradle / build
+.gradle/
+build/
+.kotlin/
+!gradle/wrapper/gradle-wrapper.jar
+HELP.md
+
+# Overlay temporário do scripts/deploy-kind.sh apply
+.deploy-overlay.*/
+
+# IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+
+# Ferramentas de agente (criadas no diretório corrente)
+.claude/
+.claude-flow/
+.swarm/
+
+# Segredos locais (nunca versionar)
+.env
+.env.local
+.env.*.local
+k8s/secret.yaml
+
+# Sistema
+.DS_Store

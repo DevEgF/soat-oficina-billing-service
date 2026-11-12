@@ -1,0 +1,21 @@
+# Só o necessário para o Gradle: wrapper, scripts de build e src/.
+.git
+.github
+.gradle
+.kotlin
+.idea
+.vscode
+.claude
+.claude-flow
+.swarm
+build
+out
+k8s
+scripts
+.deploy-overlay.*
+*.md
+**/.env
+**/.env.local
+**/.env.*.local
+Dockerfile
+.dockerignore

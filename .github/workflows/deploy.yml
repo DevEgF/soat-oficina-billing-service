@@ -1,0 +1,54 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Um deploy por vez no cluster local; não cancela o que está em andamento.
+concurrency:
+  group: deploy-kind-billing-service
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy / kind
+    # Runner self-hosted em repositório público: só roda em disparo manual ou depois de um CI
+    # verde de push na main deste mesmo repositório (um fork com branch main não dispara).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: [self-hosted, oficina-kind]
+    timeout-minutes: 30
+    env:
+      IMAGE_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      KIND_CLUSTER: oficina
+      KUBE_CONTEXT: kind-oficina
+      NAMESPACE: oficina
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.IMAGE_TAG }}
+      - name: Build da imagem
+        run: ./scripts/deploy-kind.sh build
+      - name: Carga da imagem no kind
+        run: ./scripts/deploy-kind.sh load
+      - name: Apply dos manifestos (kustomize)
+        run: ./scripts/deploy-kind.sh apply
+      - name: Rollout status
+        run: ./scripts/deploy-kind.sh wait
+      - name: Smoke test de health
+        run: ./scripts/deploy-kind.sh smoke
+      - name: Rollback
+        if: failure()
+        run: ./scripts/deploy-kind.sh rollback
+      - name: Diagnóstico
+        if: failure()
+        run: ./scripts/deploy-kind.sh diagnose

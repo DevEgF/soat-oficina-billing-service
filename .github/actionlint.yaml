@@ -1,0 +1,4 @@
+# Rótulo customizado do runner self-hosted (deploy.yml), para o actionlint.
+self-hosted-runner:
+  labels:
+    - oficina-kind
