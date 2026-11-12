@@ -2,38 +2,20 @@ package com.soat.tech.challenge.oficina.billing.integration
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.soat.tech.challenge.oficina.billing.support.IntegrationTest
 import com.soat.tech.challenge.oficina.billing.support.TestJwt
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.SpringBootTest.WebEnvironment
 import org.springframework.boot.test.web.server.LocalServerPort
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection
-import org.springframework.test.context.ActiveProfiles
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
-import org.testcontainers.postgresql.PostgreSQLContainer
-import org.testcontainers.rabbitmq.RabbitMQContainer
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 
-/**
- * Full context against real PostgreSQL and RabbitMQ containers.
- * Properties are inlined so they win over APP_* variables exported in the developer shell.
- */
-@SpringBootTest(
-    webEnvironment = WebEnvironment.RANDOM_PORT,
-    properties = [
-        "app.environment=hml",
-        "app.jwt.secret=${TestJwt.RAW_SECRET}",
-    ],
-)
-@ActiveProfiles("test")
-@Testcontainers
+/** Platform concerns of the skeleton: health, JWT, OpenAPI and route protection. */
+@IntegrationTest
 class BillingServiceIntegrationTest {
 
     @LocalServerPort
@@ -79,7 +61,15 @@ class BillingServiceIntegrationTest {
         val response = get("/v3/api-docs")
 
         assertEquals(200, response.statusCode())
-        assertTrue(body(response)["paths"].has("/api/info"))
+        val paths = body(response)["paths"]
+        listOf(
+            "/api/info",
+            "/api/catalog/services",
+            "/api/catalog/parts",
+            "/api/work-orders/{workOrderId}/quote",
+            "/api/work-orders/{workOrderId}/quote/decision",
+            "/api/work-orders/{workOrderId}/payment",
+        ).forEach { assertTrue(paths.has(it), "OpenAPI without $it") }
     }
 
     @Test
@@ -95,16 +85,4 @@ class BillingServiceIntegrationTest {
     }
 
     private fun body(response: HttpResponse<String>): JsonNode = json.readTree(response.body())
-
-    companion object {
-        @Container
-        @ServiceConnection
-        @JvmStatic
-        val postgres = PostgreSQLContainer("postgres:16.15-alpine")
-
-        @Container
-        @ServiceConnection
-        @JvmStatic
-        val rabbit = RabbitMQContainer("rabbitmq:4.2.9-alpine")
-    }
 }

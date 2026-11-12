@@ -2,9 +2,10 @@
 
 Serviço de **Cobrança (Billing)** da oficina mecânica — Tech Challenge SOAT, Fase 4.
 É um dos três microsserviços que substituem o monólito `soat-oficina-app`; os outros são
-`soat-oficina-os-service` e `soat-oficina-execution-service`. Neste estágio é só o
-esqueleto: health, validação de JWT, tratamento de erros, correlação de requisições e
-OpenAPI. O domínio (orçamento, pagamento via Mercado Pago, saga) chega nas próximas entregas.
+`soat-oficina-os-service` e `soat-oficina-execution-service`. É dono do catálogo com preços,
+do orçamento de cada OS, da decisão do cliente e do pagamento, e participa da saga orquestrada
+pelo OS Service por RabbitMQ. Hoje está o caminho feliz com pagamento simulado; as compensações
+(`CancelQuote`, `RefundPayment`) e o adaptador do Mercado Pago entram na próxima entrega.
 
 ## Stack
 
@@ -35,14 +36,65 @@ O token é HS256 assinado com SHA-256 do `APP_JWT_SECRET`, com `iss=oficina`,
 `aud=oficina-api` e `env` igual ao `APP_ENVIRONMENT`. Rotas fora de `/api/**` e das públicas
 são negadas.
 
+## API
+
+Todas as rotas `/api/**` exigem `Authorization: Bearer <jwt>`. As rotas de orçamento e pagamento
+usam o **id da OS**. Erros: 404 (não encontrado), 409 (transição inválida ou atualização
+concorrente), 400 (validação).
+
+| Rota | O que faz |
+|---|---|
+| `GET /api/catalog/services` | serviços do catálogo: `code`, `name`, `priceCents`, `estimatedMinutes` |
+| `GET /api/catalog/parts` | peças do catálogo: `code`, `name`, `priceCents` |
+| `GET /api/work-orders/{workOrderId}/quote` | orçamento com linhas e totais (404 enquanto não existir) |
+| `POST /api/work-orders/{workOrderId}/quote/decision` | corpo `{ "approved": true }` (ou `false` com `reason` opcional); só a partir de `PENDING_APPROVAL` |
+| `GET /api/work-orders/{workOrderId}/payment` | pagamento da OS (404 enquanto não existir) |
+
+O catálogo entra pela migration `V1__init.sql` (cinco serviços e cinco peças, códigos e preços
+fixados no contrato entre os serviços). Orçamento: `PENDING_APPROVAL`, `APPROVED`, `REJECTED`,
+`CANCELLED`; os totais são a soma de quantidade × preço unitário por tipo de linha, como no
+`WorkOrder.recalculateQuote` do monólito. Pagamento: `PENDING`, `APPROVED`, `REJECTED`, `REFUNDED`.
+
+## Mensagens
+
+Exchange `oficina` (topic) e `oficina.dlx` (direct). Na subida o serviço declara os dois
+exchanges, a fila que consome (`billing.commands`, binding `command.billing.#`) e a fila para
+onde publica (`os.events`, binding `event.#`), cada uma com DLQ `<fila>.dlq` ligada ao
+`oficina.dlx`. Envelope JSON: `messageId`, `sagaId` (id da OS), `type`, `occurredAt`,
+`correlationId`, `payload`.
+
+| Consome (`billing.commands`) | Efeito | Publica |
+|---|---|---|
+| `GenerateQuote` | calcula pelo catálogo e grava o orçamento `PENDING_APPROVAL` | `QuoteGenerated`; item fora do catálogo: `QuoteGenerationFailed`, sem gravar |
+| `RequestPayment` | cria o pagamento pela porta `PaymentGateway` | `PaymentApproved` ou `PaymentRejected`; `PENDING` só grava |
+| `CancelQuote`, `RefundPayment` | ainda não tratados: log WARN e ack | — |
+
+A decisão por HTTP publica `QuoteApproved` ou `QuoteRejected`. Regras:
+
+- **Idempotência:** o `messageId` vai para `processed_message` na mesma transação do efeito;
+  repetido é ignorado com ack.
+- **Publicação depois do commit**, com o `correlationId` recebido no `GenerateQuote` (guardado
+  no orçamento e no pagamento, inclusive nos eventos disparados por HTTP).
+- **Erros:** 3 tentativas (500 ms, depois 1 s) e rejeição sem requeue, que leva à DLQ. JSON
+  inválido, campo obrigatório ausente ou `type` fora do contrato vão direto para a DLQ.
+- **Fora de ordem:** comando que não se aplica ao estado atual (pagamento de orçamento não
+  aprovado, segundo `GenerateQuote` da mesma OS) é registrado em WARN e descartado com ack.
+- **Pagamento:** a porta `PaymentGateway` (`create`, `getStatus`, `refund`) segue a API de
+  Orders do Mercado Pago, em que a criação pode voltar pendente. A chave de idempotência é
+  `quote-<quoteId>`, para uma reentrega não cobrar duas vezes. Valor diferente do total do
+  orçamento é recusado sem chamar o provedor.
+
 ## Testes
 
 ```bash
 ./gradlew check
 ```
 
-Roda os testes unitários e o de integração (contexto completo contra PostgreSQL e RabbitMQ
-reais, via Testcontainers; precisa do Docker), gera o JaCoCo em
+Roda os testes unitários (domínio, serviços de aplicação e handlers com mocks, envelope) e os de
+integração (contexto completo contra PostgreSQL e RabbitMQ reais, via Testcontainers; precisa do
+Docker). O teste da saga faz o papel do OS Service: publica os comandos no exchange `oficina`,
+lê os eventos de uma fila de teste, decide o orçamento por HTTP e cobre mensagem repetida,
+retry e DLQ. Gera o JaCoCo em
 `build/reports/jacoco/test/` (XML e HTML) e falha se a cobertura de linhas do serviço inteiro
 ficar abaixo de 80%. Só a classe principal fica fora da conta (a mesma exclusão vai para o Sonar).
 
@@ -89,6 +141,7 @@ depois de um `CI` verde de push na `main`.
 | `SPRING_RABBITMQ_PASSWORD` | Secret | `oficina` |
 | `NEW_RELIC_APP_NAME` e demais `NEW_RELIC_*` | ConfigMap (`oficina-billing-service`) | — |
 | `NEW_RELIC_LICENSE_KEY` | Secret (vazio desliga o agente) | — |
+| `APP_PAYMENT_GATEWAY` | ConfigMap (`simulated`) | `simulated`; outro valor impede a subida (só existe o simulado) |
 | `MERCADOPAGO_ACCESS_TOKEN` | Secret (opcional) | vazio; propriedade `app.mercadopago.access-token` |
 
 ### Contrato do Secret `billing-service-secrets`

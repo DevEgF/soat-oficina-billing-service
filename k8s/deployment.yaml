@@ -65,7 +65,8 @@ spec:
                   name: billing-service-secrets
                   key: NEW_RELIC_LICENSE_KEY
                   optional: true
-            # Opcional: a integração com o Mercado Pago ainda não usa o token.
+            # Opcional: a integração com o Mercado Pago ainda não usa o token
+            # (APP_PAYMENT_GATEWAY=simulated no ConfigMap).
             - name: MERCADOPAGO_ACCESS_TOKEN
               valueFrom:
                 secretKeyRef:
