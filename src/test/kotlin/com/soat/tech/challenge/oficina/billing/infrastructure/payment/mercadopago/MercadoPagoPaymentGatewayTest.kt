@@ -128,14 +128,15 @@ class MercadoPagoPaymentGatewayTest {
     }
 
     @Test
-    fun `payment refused at creation answers an error with the order, which is recorded`() {
+    fun `payment refused at creation answers 402 with the order under data, which is recorded`() {
         expectCardToken("OTHE")
         server.expect(requestTo("$BASE_URL/v1/orders"))
             .andRespond(
                 json(
                     HttpStatus.PAYMENT_REQUIRED,
-                    """{"id": "ORDTST04", "status": "failed", "status_detail": "failed",
-                       "transactions": {"payments": [{"status": "failed", "status_detail": "rejected_by_issuer"}]}}""",
+                    """{"errors": [{"code": "failed", "message": "The following transactions failed", "details": ["PAYTST04: rejected_by_issuer"]}],
+                       "data": {"id": "ORDTST04", "status": "failed", "status_detail": "failed",
+                         "transactions": {"payments": [{"status": "failed", "status_detail": "rejected_by_issuer"}]}}}""",
                 ),
             )
 
@@ -143,6 +144,33 @@ class MercadoPagoPaymentGatewayTest {
 
         assertEquals(GatewayPayment("ORDTST04", GatewayPaymentStatus.PENDING, "rejected_by_issuer"), result)
         server.verify()
+    }
+
+    @Test
+    fun `error answer that carries the order at the top level is recorded too`() {
+        expectCardToken("OTHE")
+        server.expect(requestTo("$BASE_URL/v1/orders"))
+            .andRespond(
+                json(
+                    HttpStatus.PAYMENT_REQUIRED,
+                    """{"id": "ORDTST05", "status": "failed", "status_detail": "failed",
+                       "transactions": {"payments": [{"status": "failed", "status_detail": "rejected_by_issuer"}]}}""",
+                ),
+            )
+
+        val result = gateway().create(creation().copy(cardholderName = "OTHE"))
+
+        assertEquals(GatewayPayment("ORDTST05", GatewayPaymentStatus.PENDING, "rejected_by_issuer"), result)
+        server.verify()
+    }
+
+    @Test
+    fun `error answer without an order stays an error`() {
+        expectCardToken()
+        server.expect(requestTo("$BASE_URL/v1/orders"))
+            .andRespond(json(HttpStatus.PAYMENT_REQUIRED, """{"errors": [{"code": "failed"}], "data": {"status": "failed"}}"""))
+
+        assertFailsWith<PaymentProviderException> { gateway().create(creation()) }
     }
 
     @Test

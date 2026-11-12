@@ -117,7 +117,7 @@ teste**, com a conta de teste do projeto:
    com o titular guardado na aprovação;
 2. `POST /v1/orders` (cabeçalhos `Authorization` e `X-Idempotency-Key: quote-<quoteId>`) cria a
    order; o pagamento fica sempre `PENDING`, mesmo quando a order já volta resolvida (inclusive
-   recusada, que vem como erro HTTP com a order `failed` no corpo), e quem publica o resultado é a
+   recusada, que vem como HTTP 402 com a order `failed` no campo `data`), e quem publica o resultado é a
    verificação periódica;
 3. `GET /v1/orders/{id}` é a consulta da verificação periódica;
 4. `POST /v1/orders/{id}/refund` estorna o valor total (só para order `processed`).

@@ -69,9 +69,10 @@ class MercadoPagoPaymentGateway(
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(mapper.writeValueAsString(body))
         }
-        // A payment refused right away comes back as an HTTP error that still carries the created
-        // order (status failed): the order exists, so it is recorded and resolved like any other.
-        val order = response.body?.takeIf { response.status !in 200..299 && it.isOrder() }
+        // A payment refused right away comes back as HTTP 402 with the list of errors and the created
+        // order under `data` (status failed): the order exists, so it is recorded and resolved like
+        // any other.
+        val order = response.takeIf { it.status !in 200..299 }?.orderInError()
             ?.also { log.warn("mercadopago.order.created-with-error httpStatus={} orderId={}", response.status, it.text("id")) }
             ?: response.requireSuccess(CREATE_ORDER)
         val created = toGatewayPayment(order, CREATE_ORDER)
@@ -193,6 +194,10 @@ class MercadoPagoPaymentGateway(
                 body?.path("cause")?.path(0)?.text("code"),
                 body?.text("error"),
             ).firstOrNull { it != null && SAFE_CODE.matches(it) }
+
+        /** Order carried by an error answer: under `data`, or the answer itself. */
+        fun orderInError(): JsonNode? =
+            sequenceOf(body?.get("data"), body).firstOrNull { it != null && it.isOrder() }
     }
 
     companion object {
