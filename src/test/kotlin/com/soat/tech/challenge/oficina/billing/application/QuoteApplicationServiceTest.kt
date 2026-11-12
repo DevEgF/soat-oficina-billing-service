@@ -4,6 +4,7 @@ import com.soat.tech.challenge.oficina.billing.application.messaging.EventPublis
 import com.soat.tech.challenge.oficina.billing.application.messaging.MessageType
 import com.soat.tech.challenge.oficina.billing.application.messaging.OutgoingEvent
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteApprovedPayload
+import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteCancelledPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteGeneratedPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteGenerationFailedPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteRejectedPayload
@@ -36,7 +37,13 @@ class QuoteApplicationServiceTest {
     private val quotes = mockk<QuoteRepository>()
     private val catalog = mockk<CatalogRepository>()
     private val events = mockk<EventPublisher>(relaxed = true)
-    private val service = QuoteApplicationService(quotes, catalog, events, Clock.fixed(now, ZoneOffset.UTC))
+    private val service = QuoteApplicationService(
+        quotes,
+        catalog,
+        events,
+        Clock.fixed(now, ZoneOffset.UTC),
+        PaymentProperties(defaultCardholderName = "APRO"),
+    )
     private val workOrderId = UUID.randomUUID()
 
     private fun command(services: List<RequestedItem>, parts: List<RequestedItem> = emptyList()) = GenerateQuoteCommand(
@@ -121,6 +128,7 @@ class QuoteApplicationServiceTest {
         val result = service.decide(workOrderId, approved = true, reason = null)
 
         assertEquals(QuoteStatus.APPROVED, result.status)
+        assertEquals("APRO", result.cardholderName)
         assertEquals(MessageType.QUOTE_APPROVED, event.captured.type)
         assertEquals("corr-saga", event.captured.correlationId)
         assertEquals(QuoteApprovedPayload(workOrderId, quote.id, 12000), event.captured.payload)
@@ -164,5 +172,62 @@ class QuoteApplicationServiceTest {
         every { quotes.findByWorkOrderId(workOrderId) } returns quote
 
         assertEquals(quote, service.get(workOrderId))
+    }
+
+    @Test
+    fun `approval keeps the cardholder name sent with the decision`() {
+        val quote = existingQuote()
+        every { quotes.findByWorkOrderId(workOrderId) } returns quote
+        every { quotes.save(quote) } returns quote
+
+        assertEquals("CONT", service.decide(workOrderId, approved = true, reason = null, cardholderName = " CONT ").cardholderName)
+    }
+
+    @Test
+    fun `cancel of an open or approved quote cancels and publishes QuoteCancelled`() {
+        listOf(existingQuote(), existingQuote().apply { approve(now) }).forEach { quote ->
+            every { quotes.findByWorkOrderId(workOrderId) } returns quote
+            every { quotes.save(quote) } returns quote
+            val event = slot<OutgoingEvent>()
+            every { events.publishAfterCommit(capture(event)) } returns Unit
+
+            service.cancel(CancelQuoteCommand(workOrderId, quote.id, "ApprovalTimeout"))
+
+            assertEquals(QuoteStatus.CANCELLED, quote.status)
+            assertEquals("ApprovalTimeout", quote.decisionReason)
+            assertEquals(MessageType.QUOTE_CANCELLED, event.captured.type)
+            assertEquals("corr-saga", event.captured.correlationId)
+            assertEquals(QuoteCancelledPayload(workOrderId, quote.id), event.captured.payload)
+            verify { quotes.save(quote) }
+        }
+    }
+
+    @Test
+    fun `cancel of a closed quote confirms again without changing it`() {
+        val cancelled = existingQuote().apply { cancel(now, "first") }
+        val rejected = existingQuote().apply { reject(now, "caro") }
+        listOf(cancelled to QuoteStatus.CANCELLED, rejected to QuoteStatus.REJECTED).forEach { (quote, status) ->
+            every { quotes.findByWorkOrderId(workOrderId) } returns quote
+            val event = slot<OutgoingEvent>()
+            every { events.publishAfterCommit(capture(event)) } returns Unit
+
+            // Without quoteId the quote of the work order is used.
+            service.cancel(CancelQuoteCommand(workOrderId, null, "PaymentRejected"))
+
+            assertEquals(status, quote.status)
+            assertEquals(QuoteCancelledPayload(workOrderId, quote.id), event.captured.payload)
+        }
+        verify(exactly = 0) { quotes.save(any()) }
+    }
+
+    @Test
+    fun `cancel of an unknown quote is discarded`() {
+        every { quotes.findByWorkOrderId(workOrderId) } returns null
+        service.cancel(CancelQuoteCommand(workOrderId, UUID.randomUUID(), "x"))
+        every { quotes.findByWorkOrderId(workOrderId) } returns existingQuote()
+        service.cancel(CancelQuoteCommand(workOrderId, UUID.randomUUID(), "x"))
+
+        verify(exactly = 0) { quotes.save(any()) }
+        verify(exactly = 0) { events.publishAfterCommit(any()) }
     }
 }

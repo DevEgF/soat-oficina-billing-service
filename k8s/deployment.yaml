@@ -65,13 +65,49 @@ spec:
                   name: billing-service-secrets
                   key: NEW_RELIC_LICENSE_KEY
                   optional: true
-            # Opcional: a integração com o Mercado Pago ainda não usa o token
-            # (APP_PAYMENT_GATEWAY=simulated no ConfigMap).
+            # Mercado Pago (APP_PAYMENT_GATEWAY=mercadopago no ConfigMap). Opcionais aqui de propósito:
+            # se faltar alguma chave, o serviço não sobe e o log diz qual variável está ausente.
             - name: MERCADOPAGO_ACCESS_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: billing-service-secrets
                   key: MERCADOPAGO_ACCESS_TOKEN
+                  optional: true
+            - name: MERCADOPAGO_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: billing-service-secrets
+                  key: MERCADOPAGO_PUBLIC_KEY
+                  optional: true
+            - name: MERCADOPAGO_TEST_CARD_NUMBER
+              valueFrom:
+                secretKeyRef:
+                  name: billing-service-secrets
+                  key: MERCADOPAGO_TEST_CARD_NUMBER
+                  optional: true
+            - name: MERCADOPAGO_TEST_CARD_SECURITY_CODE
+              valueFrom:
+                secretKeyRef:
+                  name: billing-service-secrets
+                  key: MERCADOPAGO_TEST_CARD_SECURITY_CODE
+                  optional: true
+            - name: MERCADOPAGO_TEST_CARD_EXPIRATION_MONTH
+              valueFrom:
+                secretKeyRef:
+                  name: billing-service-secrets
+                  key: MERCADOPAGO_TEST_CARD_EXPIRATION_MONTH
+                  optional: true
+            - name: MERCADOPAGO_TEST_CARD_EXPIRATION_YEAR
+              valueFrom:
+                secretKeyRef:
+                  name: billing-service-secrets
+                  key: MERCADOPAGO_TEST_CARD_EXPIRATION_YEAR
+                  optional: true
+            - name: MERCADOPAGO_TEST_CARD_HOLDER_DOCUMENT
+              valueFrom:
+                secretKeyRef:
+                  name: billing-service-secrets
+                  key: MERCADOPAGO_TEST_CARD_HOLDER_DOCUMENT
                   optional: true
           securityContext:
             allowPrivilegeEscalation: false

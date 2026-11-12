@@ -40,7 +40,7 @@ class EnvelopeCodecTest {
     }
 
     @Test
-    fun `decodes the envelope of the spec and its payload ignoring unknown fields`() {
+    fun `decodes the saga envelope and its payload ignoring unknown fields`() {
         val envelope = codec.decode(message(envelopeJson()))
 
         assertEquals(messageId, envelope.messageId)
@@ -100,7 +100,7 @@ class EnvelopeCodecTest {
     }
 
     @Test
-    fun `encodes json body with message properties of the spec`() {
+    fun `encodes json body with the contract message properties`() {
         val quoteId = UUID.randomUUID()
         val envelope = MessageEnvelope(
             messageId = messageId,

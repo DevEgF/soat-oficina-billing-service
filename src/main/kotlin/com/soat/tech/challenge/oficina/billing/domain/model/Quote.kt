@@ -42,6 +42,7 @@ class Quote(
     decidedAt: Instant? = null,
     decisionReason: String? = null,
     updatedAt: Instant = createdAt,
+    cardholderName: String? = null,
 ) {
     var status: QuoteStatus = status
         private set
@@ -50,6 +51,13 @@ class Quote(
     var decisionReason: String? = decisionReason
         private set
     var updatedAt: Instant = updatedAt
+        private set
+
+    /**
+     * Cardholder name given with the approval and used when the payment is requested. In the
+     * Mercado Pago test environment the name of the test card holder selects the result.
+     */
+    var cardholderName: String? = cardholderName
         private set
 
     var servicesTotalCents: Long = 0
@@ -76,12 +84,13 @@ class Quote(
         }
     }
 
-    /** Customer approves the quote. */
-    fun approve(now: Instant) {
+    /** Customer approves the quote, optionally with the cardholder name of the payment. */
+    fun approve(now: Instant, cardholderName: String? = null) {
         requireStatus("approve", QuoteStatus.PENDING_APPROVAL)
         status = QuoteStatus.APPROVED
         decidedAt = now
         updatedAt = now
+        this.cardholderName = cardholderName?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     /** Customer rejects the quote. */
@@ -92,6 +101,9 @@ class Quote(
         decisionReason = reason?.trim()?.takeIf { it.isNotEmpty() }
         updatedAt = now
     }
+
+    /** A cancelled or rejected quote is final: a repeated CancelQuote only needs the confirmation again. */
+    val isClosed: Boolean get() = status == QuoteStatus.CANCELLED || status == QuoteStatus.REJECTED
 
     /** Saga compensation (CancelQuote): an open or approved quote is cancelled. */
     fun cancel(now: Instant, reason: String?) {

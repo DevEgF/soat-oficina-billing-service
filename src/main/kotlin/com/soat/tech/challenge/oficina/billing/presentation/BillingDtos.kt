@@ -7,6 +7,8 @@ import com.soat.tech.challenge.oficina.billing.domain.model.Payment
 import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.model.Quote
 import com.soat.tech.challenge.oficina.billing.domain.model.QuoteStatus
+import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
 import java.time.Instant
@@ -43,6 +45,20 @@ data class QuoteDecisionRequest(
     /** Optional rejection reason, sent in QuoteRejected. */
     @field:Size(max = 500)
     val reason: String? = null,
+    /** Optional payment data of the approval; without it the configured default cardholder is used. */
+    @field:Valid
+    val payment: PaymentDetailsRequest? = null,
+)
+
+/**
+ * Payment data sent with the approval. In the provider test environment the cardholder name selects
+ * the result (APRO approves, CONT stays pending, OTHE is rejected); in production the frontend would
+ * send a card token created by the provider SDK instead.
+ */
+data class PaymentDetailsRequest(
+    @field:NotBlank
+    @field:Size(max = 100)
+    val cardholderName: String? = null,
 )
 
 data class PaymentResponse(
@@ -53,6 +69,8 @@ data class PaymentResponse(
     val status: PaymentStatus,
     val provider: String,
     val providerPaymentId: String?,
+    /** Provider detail: rejection reason or provider status detail. */
+    val statusDetail: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -81,6 +99,7 @@ fun Payment.toResponse() = PaymentResponse(
     status = status,
     provider = provider,
     providerPaymentId = providerPaymentId,
+    statusDetail = statusDetail,
     createdAt = createdAt,
     updatedAt = updatedAt,
 )
