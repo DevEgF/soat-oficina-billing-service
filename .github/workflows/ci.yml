@@ -34,8 +34,10 @@ jobs:
           cache: gradle
       - name: Testes e gate de cobertura (80% de linhas)
         run: ./gradlew --no-daemon check
+      # O plano gratuito do SonarQube Cloud analisa só a branch principal e os pull requests:
+      # no push na develop rodam os testes, o gate de cobertura e a imagem, sem o Sonar.
       - name: Análise do Sonar com quality gate
-        if: env.SONAR_TOKEN != ''
+        if: env.SONAR_TOKEN != '' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main')
         run: ./gradlew --no-daemon sonar -Dsonar.qualitygate.wait=true
       - name: Resumo da cobertura
         if: always()

@@ -1,8 +1,8 @@
 # soat-oficina-billing-service
 
 [![CI](https://github.com/DevEgF/soat-oficina-billing-service/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/DevEgF/soat-oficina-billing-service/actions/workflows/ci.yml?query=branch%3Adevelop)
-[![Cobertura](https://sonarcloud.io/api/project_badges/measure?project=DevEgF_soat-oficina-billing-service&metric=coverage&branch=develop)](https://sonarcloud.io/summary/new_code?id=DevEgF_soat-oficina-billing-service&branch=develop)
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=DevEgF_soat-oficina-billing-service&metric=alert_status&branch=develop)](https://sonarcloud.io/summary/new_code?id=DevEgF_soat-oficina-billing-service&branch=develop)
+[![Cobertura](https://sonarcloud.io/api/project_badges/measure?project=DevEgF_soat-oficina-billing-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=DevEgF_soat-oficina-billing-service)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=DevEgF_soat-oficina-billing-service&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=DevEgF_soat-oficina-billing-service)
 
 Serviço de **Cobrança (Billing)** da oficina mecânica — Tech Challenge SOAT, Fase 4.
 
@@ -289,12 +289,13 @@ inteiro ficar abaixo de 80%**. Só a classe principal fica fora da conta (a mesm
 o Sonar).
 
 **CI e Sonar.** O workflow `CI` roda em pull request e em push na `main` e na `develop`. O job
-`ci / build` roda `./gradlew check` e, quando o secret `SONAR_TOKEN` existe, a análise no
+`ci / build` roda `./gradlew check` e, em pull request e na `main`, quando o secret `SONAR_TOKEN` existe, a análise no
 SonarQube Cloud (`DevEgF_soat-oficina-billing-service`, organização `devegf-soat-oficina`) com
 `-Dsonar.qualitygate.wait=true`, usando o relatório XML do JaCoCo para a cobertura; o job
 `ci / image` faz o build da imagem, sem push. A análise automática do SonarQube Cloud não se
-aplica: o projeto não está vinculado ao GitHub, e a análise que vale é a do CI. Os badges do topo
-mostram o CI, a cobertura e o quality gate da `develop`.
+aplica: o projeto não está vinculado ao GitHub, e a análise que vale é a do CI. O plano gratuito
+do SonarQube Cloud não analisa outras branches, então o push na `develop` roda testes, gate de
+cobertura e imagem, sem o Sonar. O badge do CI mostra a `develop`; os do Sonar, a `main`.
 
 **Verificação de dependências.** `gradle/verification-metadata.xml` tem o SHA-256 de todos os
 artefatos que o build resolve (plugins, BOMs, Kotlin, JaCoCo, Testcontainers, API do New Relic e
