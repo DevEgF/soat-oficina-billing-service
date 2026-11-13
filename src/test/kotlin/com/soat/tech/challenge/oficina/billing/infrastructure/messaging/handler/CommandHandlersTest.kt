@@ -8,6 +8,7 @@ import com.soat.tech.challenge.oficina.billing.application.RefundPaymentCommand
 import com.soat.tech.challenge.oficina.billing.application.RequestPaymentCommand
 import com.soat.tech.challenge.oficina.billing.application.messaging.MessageType
 import com.soat.tech.challenge.oficina.billing.domain.model.RequestedItem
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
 import com.soat.tech.challenge.oficina.billing.infrastructure.messaging.EnvelopeCodec
 import com.soat.tech.challenge.oficina.billing.infrastructure.messaging.InvalidMessageException
 import com.soat.tech.challenge.oficina.billing.infrastructure.messaging.MessageEnvelope
@@ -74,15 +75,17 @@ class CommandHandlersTest {
         val handler = RequestPaymentHandler(codec, payments)
         val quoteId = UUID.randomUUID()
 
+        val traceContext = TraceContext(traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+
         handler.handle(
             envelope(
                 "RequestPayment",
                 mapOf("workOrderId" to workOrderId.toString(), "quoteId" to quoteId.toString(), "amountCents" to 21000),
-            ),
+            ).copy(traceContext = traceContext),
         )
 
         assertEquals(MessageType.REQUEST_PAYMENT, handler.type)
-        verify { payments.requestPayment(RequestPaymentCommand(workOrderId, quoteId, 21000)) }
+        verify { payments.requestPayment(RequestPaymentCommand(workOrderId, quoteId, 21000, traceContext)) }
     }
 
     @Test

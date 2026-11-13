@@ -1,5 +1,7 @@
 package com.soat.tech.challenge.oficina.billing.infrastructure.messaging
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
 import org.springframework.amqp.AmqpRejectAndDontRequeueException
 import org.springframework.amqp.core.Message
 import org.springframework.amqp.core.MessageDeliveryMode
@@ -20,6 +22,12 @@ data class MessageEnvelope(
     val occurredAt: Instant,
     val correlationId: String,
     val payload: JsonNode,
+    /**
+     * Trace headers of the received message (AMQP headers, not part of the JSON body). Messages
+     * published by this service get theirs from the APM agent.
+     */
+    @get:JsonIgnore
+    val traceContext: TraceContext? = null,
 )
 
 /**
@@ -56,8 +64,15 @@ class EnvelopeCodec(private val mapper: JsonMapper) {
             occurredAt = root.instant("occurredAt"),
             correlationId = correlationId ?: throw InvalidMessageException("Envelope without correlationId"),
             payload = payload,
+            traceContext = TraceContext.fromHeaders(transportHeaders(message)),
         )
     }
+
+    /** AMQP headers of the message with a text value (the converter already turned them into String). */
+    fun transportHeaders(message: Message): Map<String, String> =
+        message.messageProperties.headers
+            .mapNotNull { (name, value) -> (value as? String)?.let { name to it } }
+            .toMap()
 
     fun <T : Any> payload(envelope: MessageEnvelope, type: Class<T>): T = try {
         mapper.treeToValue(envelope.payload, type)

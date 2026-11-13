@@ -28,6 +28,8 @@ data:
   NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: "true"
   NEW_RELIC_APPLICATION_LOGGING_ENABLED: "true"
   NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED: "true"
+  # Logs encaminhados levam o MDC (requestId, sagaId, messageType, messageId) como atributos.
+  NEW_RELIC_APPLICATION_LOGGING_FORWARDING_CONTEXT_DATA_ENABLED: "true"
   NEW_RELIC_APPLICATION_LOGGING_LOCAL_DECORATING_ENABLED: "false"
   NEW_RELIC_ATTRIBUTES_EXCLUDE: "request.parameters.*,request.headers.*,response.headers.*,cpf,authorization,password"
   NEW_RELIC_TRANSACTION_TRACER_RECORD_SQL: "off"

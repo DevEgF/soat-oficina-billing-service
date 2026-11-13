@@ -12,6 +12,7 @@ import com.soat.tech.challenge.oficina.billing.domain.model.Payment
 import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.model.Quote
 import com.soat.tech.challenge.oficina.billing.domain.model.QuoteLine
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
 import com.soat.tech.challenge.oficina.billing.domain.port.GatewayPayment
 import com.soat.tech.challenge.oficina.billing.domain.port.GatewayPaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentCreation
@@ -69,7 +70,20 @@ class PaymentApplicationServiceTest {
         every { events.publishAfterCommit(capture(event)) } returns Unit
     }
 
-    private fun command(amount: Long = 12000, quoteId: UUID = quote.id) = RequestPaymentCommand(workOrderId, quoteId, amount)
+    private fun command(amount: Long = 12000, quoteId: UUID = quote.id, traceContext: TraceContext? = null) =
+        RequestPaymentCommand(workOrderId, quoteId, amount, traceContext)
+
+    @Test
+    fun `trace context of the command is stored with the payment`() {
+        quote.approve(now, "CONT")
+        every { gateway.create(any()) } returns GatewayPayment("prov-3", GatewayPaymentStatus.PENDING, "in_process")
+        val traceContext = TraceContext(traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+
+        service.requestPayment(command(traceContext = traceContext))
+
+        assertEquals(PaymentStatus.PENDING, saved.captured.status)
+        assertEquals(traceContext, saved.captured.traceContext)
+    }
 
     @Test
     fun `approved charge publishes PaymentApproved`() {

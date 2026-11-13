@@ -24,6 +24,8 @@ class Payment(
     statusDetail: String?,
     val createdAt: Instant,
     updatedAt: Instant,
+    /** Trace context of the RequestPayment that created the payment; continued when it is resolved later. */
+    val traceContext: TraceContext? = null,
 ) {
     var status: PaymentStatus = status
         private set
@@ -87,6 +89,7 @@ class Payment(
             provider: String,
             correlationId: String,
             now: Instant,
+            traceContext: TraceContext? = null,
             id: UUID = UUID.randomUUID(),
         ) = Payment(
             id = id,
@@ -100,6 +103,7 @@ class Payment(
             statusDetail = null,
             createdAt = now,
             updatedAt = now,
+            traceContext = traceContext,
         )
     }
 }
