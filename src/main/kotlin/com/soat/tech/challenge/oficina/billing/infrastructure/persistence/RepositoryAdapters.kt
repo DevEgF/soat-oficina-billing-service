@@ -6,6 +6,7 @@ import com.soat.tech.challenge.oficina.billing.domain.model.Payment
 import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.model.Quote
 import com.soat.tech.challenge.oficina.billing.domain.model.QuoteLine
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
 import com.soat.tech.challenge.oficina.billing.domain.port.CatalogRepository
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentRepository
 import com.soat.tech.challenge.oficina.billing.domain.port.QuoteRepository
@@ -112,6 +113,9 @@ class PaymentRepositoryAdapter(private val jpa: PaymentJpaRepository) : PaymentR
         entity.correlationId = payment.correlationId
         entity.createdAt = payment.createdAt
         entity.updatedAt = payment.updatedAt
+        entity.traceParent = payment.traceContext?.traceparent
+        entity.traceState = payment.traceContext?.tracestate
+        entity.traceNewrelic = payment.traceContext?.newrelic
         return jpa.saveAndFlush(entity).toDomain()
     }
 
@@ -127,5 +131,6 @@ class PaymentRepositoryAdapter(private val jpa: PaymentJpaRepository) : PaymentR
         statusDetail = statusDetail,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        traceContext = TraceContext(traceParent, traceState, traceNewrelic).takeIf { it.toHeaders().isNotEmpty() },
     )
 }

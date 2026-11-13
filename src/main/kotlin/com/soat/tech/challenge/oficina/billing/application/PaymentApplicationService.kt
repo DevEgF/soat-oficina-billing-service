@@ -11,6 +11,7 @@ import com.soat.tech.challenge.oficina.billing.domain.model.Payment
 import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.model.Quote
 import com.soat.tech.challenge.oficina.billing.domain.model.QuoteStatus
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
 import com.soat.tech.challenge.oficina.billing.domain.port.GatewayPaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentCreation
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentGateway
@@ -29,6 +30,8 @@ data class RequestPaymentCommand(
     val workOrderId: UUID,
     val quoteId: UUID,
     val amountCents: Long,
+    /** Trace context of the RequestPayment message, stored with the payment. */
+    val traceContext: TraceContext? = null,
 )
 
 data class RefundPaymentCommand(
@@ -93,6 +96,7 @@ class PaymentApplicationService(
             provider = gateway.provider,
             correlationId = quote.correlationId,
             now = now(),
+            traceContext = command.traceContext,
         )
         val resolved = if (command.amountCents != quote.totalCents) {
             payment.rejectLocally("Amount ${command.amountCents} differs from quote total ${quote.totalCents}", now())

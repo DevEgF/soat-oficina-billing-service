@@ -7,11 +7,13 @@ import com.soat.tech.challenge.oficina.billing.application.messaging.PaymentAppr
 import com.soat.tech.challenge.oficina.billing.application.messaging.PaymentRejectedPayload
 import com.soat.tech.challenge.oficina.billing.domain.model.Payment
 import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
 import com.soat.tech.challenge.oficina.billing.domain.port.GatewayPayment
 import com.soat.tech.challenge.oficina.billing.domain.port.GatewayPaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentGateway
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentProviderException
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentRepository
+import com.soat.tech.challenge.oficina.billing.support.RecordingTracing
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -31,26 +33,32 @@ class PaymentStatusCheckServiceTest {
     private val payments = mockk<PaymentRepository>()
     private val gateway = mockk<PaymentGateway>()
     private val events = mockk<EventPublisher>(relaxed = true)
+    private val tracing = RecordingTracing()
     private val service = PaymentStatusCheckService(
         payments,
         gateway,
         events,
         TransactionOperations.withoutTransaction(),
         Clock.fixed(now, ZoneOffset.UTC),
+        tracing,
     )
     private val published = mutableListOf<OutgoingEvent>()
 
-    private fun pending(providerPaymentId: String?, correlationId: String = "corr-saga"): Payment {
+    private fun pending(
+        providerPaymentId: String?,
+        correlationId: String = "corr-saga",
+        traceContext: TraceContext? = null,
+    ): Payment {
         val payment = Payment(
             UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 21000, "FAKE", correlationId,
-            PaymentStatus.PENDING, providerPaymentId, "in_process", now, now,
+            PaymentStatus.PENDING, providerPaymentId, "in_process", now, now, traceContext,
         )
         every { payments.findById(payment.id) } answers {
             // Fresh copy, as a reload inside the transaction would return.
             Payment(
                 payment.id, payment.workOrderId, payment.quoteId, payment.amountCents, payment.provider,
                 payment.correlationId, payment.status, payment.providerPaymentId, payment.statusDetail,
-                payment.createdAt, payment.updatedAt,
+                payment.createdAt, payment.updatedAt, payment.traceContext,
             )
         }
         return payment
@@ -125,10 +133,47 @@ class PaymentStatusCheckServiceTest {
     }
 
     @Test
+    fun `each payment is checked in its own job transaction that continues the stored trace`() {
+        val traceContext = TraceContext("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", "1@nr=0-0-1-2-3", "eyJ2IjpbMCwxXX0=")
+        val traced = pending("ord-1", traceContext = traceContext)
+        val untraced = pending("ord-2")
+        every { payments.findPending() } returns listOf(traced, untraced)
+        every { gateway.getStatus("ord-1") } answers {
+            // The provider is called inside the transaction of this payment.
+            assertEquals(1, tracing.transactions.size)
+            GatewayPayment("ord-1", GatewayPaymentStatus.APPROVED, "accredited")
+        }
+        every { gateway.getStatus("ord-2") } returns GatewayPayment("ord-2", GatewayPaymentStatus.PENDING)
+        stubSaveAndPublish()
+
+        service.checkPending()
+
+        assertEquals(2, tracing.transactions.size)
+        val first = tracing.transactions[0]
+        assertEquals("Job", first.category)
+        assertEquals(PaymentStatusCheckService.JOB_NAME, first.name)
+        assertEquals(
+            mapOf(
+                "traceparent" to traceContext.traceparent,
+                "tracestate" to traceContext.tracestate,
+                "newrelic" to traceContext.newrelic,
+            ),
+            first.traceHeaders,
+        )
+        assertEquals(
+            mapOf("sagaId" to traced.workOrderId.toString(), "paymentId" to traced.id.toString()),
+            first.attributes,
+        )
+        assertEquals(emptyMap<String, String>(), tracing.transactions[1].traceHeaders)
+        assertEquals(listOf(MessageType.PAYMENT_APPROVED), published.map { it.type })
+    }
+
+    @Test
     fun `nothing pending does nothing`() {
         every { payments.findPending() } returns emptyList()
 
         assertEquals(StatusCheckSummary(0, 0, 0), service.checkPending())
         verify(exactly = 0) { gateway.getStatus(any()) }
+        assertEquals(0, tracing.transactions.size)
     }
 }

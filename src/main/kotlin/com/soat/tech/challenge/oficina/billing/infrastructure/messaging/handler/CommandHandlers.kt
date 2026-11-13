@@ -71,7 +71,15 @@ class RequestPaymentHandler(
     override fun handle(envelope: MessageEnvelope) {
         val payload = codec.payload(envelope, RequestPaymentPayload::class.java)
         requireSameSaga(envelope, payload.workOrderId)
-        payments.requestPayment(RequestPaymentCommand(payload.workOrderId, payload.quoteId, payload.amountCents))
+        payments.requestPayment(
+            RequestPaymentCommand(
+                workOrderId = payload.workOrderId,
+                quoteId = payload.quoteId,
+                amountCents = payload.amountCents,
+                // Kept with the payment: the periodic check continues this trace when it resolves it.
+                traceContext = envelope.traceContext,
+            ),
+        )
     }
 }
 

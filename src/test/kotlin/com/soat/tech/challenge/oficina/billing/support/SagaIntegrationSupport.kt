@@ -73,6 +73,7 @@ abstract class SagaIntegrationSupport {
         payload: Any,
         correlationId: String = "corr-${UUID.randomUUID()}",
         messageId: UUID = UUID.randomUUID(),
+        headers: Map<String, String> = emptyMap(),
     ) {
         val envelope = mapOf(
             "messageId" to messageId.toString(),
@@ -85,6 +86,7 @@ abstract class SagaIntegrationSupport {
         val message = rawMessage(mapper.writeValueAsBytes(envelope), messageId.toString())
         message.messageProperties.type = type
         message.messageProperties.setHeader("x-correlation-id", correlationId)
+        headers.forEach(message.messageProperties::setHeader)
         rabbit.send(EXCHANGE, routingKey, message)
     }
 

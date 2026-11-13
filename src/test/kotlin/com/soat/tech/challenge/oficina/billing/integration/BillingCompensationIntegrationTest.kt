@@ -161,8 +161,22 @@ class BillingCompensationIntegrationTest : SagaIntegrationSupport() {
         val correlationId = "corr-${UUID.randomUUID()}"
         val quoteId = generateQuote(workOrderId, correlationId)
         approve(workOrderId, "CONT")
-        requestPayment(workOrderId, quoteId)
+        val traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+        requestPayment(
+            workOrderId,
+            quoteId,
+            mapOf("traceparent" to traceparent, "tracestate" to "1@nr=0-0-1-2-3", "newrelic" to "eyJ2IjpbMCwxXX0="),
+        )
         val providerPaymentId = awaitPendingPayment(workOrderId)
+        // Trace headers of RequestPayment kept with the payment for the periodic check.
+        val trace = jdbc.queryForMap(
+            "SELECT trace_parent, trace_state, trace_newrelic FROM payment WHERE work_order_id = ?",
+            workOrderId,
+        )
+        assertEquals(
+            mapOf("trace_parent" to traceparent, "trace_state" to "1@nr=0-0-1-2-3", "trace_newrelic" to "eyJ2IjpbMCwxXX0="),
+            trace,
+        )
 
         simulatedGateway.settle(providerPaymentId, GatewayPaymentStatus.APPROVED, "accredited")
 
@@ -211,11 +225,12 @@ class BillingCompensationIntegrationTest : SagaIntegrationSupport() {
         assertEquals(200, response.statusCode(), response.body())
     }
 
-    private fun requestPayment(workOrderId: UUID, quoteId: String) = publishCommand(
+    private fun requestPayment(workOrderId: UUID, quoteId: String, headers: Map<String, String> = emptyMap()) = publishCommand(
         "RequestPayment",
         "command.billing.request-payment",
         workOrderId,
         mapOf("workOrderId" to workOrderId.toString(), "quoteId" to quoteId, "amountCents" to 21000),
+        headers = headers,
     )
 
     private fun cancelQuote(workOrderId: UUID, quoteId: String, messageId: UUID = UUID.randomUUID()) = publishCommand(
