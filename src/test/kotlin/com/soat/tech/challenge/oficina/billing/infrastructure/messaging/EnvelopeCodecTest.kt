@@ -3,6 +3,7 @@ package com.soat.tech.challenge.oficina.billing.infrastructure.messaging
 import com.soat.tech.challenge.oficina.billing.application.messaging.GenerateQuotePayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.QuoteGeneratedPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.RequestPaymentPayload
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -40,7 +41,7 @@ class EnvelopeCodecTest {
     }
 
     @Test
-    fun `decodes the envelope of the spec and its payload ignoring unknown fields`() {
+    fun `decodes the saga envelope and its payload ignoring unknown fields`() {
         val envelope = codec.decode(message(envelopeJson()))
 
         assertEquals(messageId, envelope.messageId)
@@ -49,6 +50,23 @@ class EnvelopeCodecTest {
         assertEquals(Instant.parse("2026-11-12T15:04:05.123Z"), envelope.occurredAt)
         assertEquals("corr-1", envelope.correlationId)
         assertEquals(RequestPaymentPayload(sagaId, messageId, 100), codec.payload(envelope, RequestPaymentPayload::class.java))
+    }
+
+    @Test
+    fun `trace headers of the message become the trace context of the envelope`() {
+        val traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+        val message = message(
+            envelopeJson(),
+            mapOf("traceparent" to traceparent, "newrelic" to "eyJ2IjpbMCwxXX0=", "x-death-count" to 1),
+        )
+
+        val envelope = codec.decode(message)
+
+        assertEquals(TraceContext(traceparent = traceparent, newrelic = "eyJ2IjpbMCwxXX0="), envelope.traceContext)
+        assertEquals(mapOf("traceparent" to traceparent, "newrelic" to "eyJ2IjpbMCwxXX0="), codec.transportHeaders(message))
+        assertNull(codec.decode(message(envelopeJson())).traceContext)
+        // The trace context travels in AMQP headers only, never in the JSON body.
+        assertFalse(mapper.readTree(codec.encode(envelope).body).has("traceContext"))
     }
 
     @Test
@@ -100,7 +118,7 @@ class EnvelopeCodecTest {
     }
 
     @Test
-    fun `encodes json body with message properties of the spec`() {
+    fun `encodes json body with the contract message properties`() {
         val quoteId = UUID.randomUUID()
         val envelope = MessageEnvelope(
             messageId = messageId,

@@ -4,14 +4,18 @@ import com.soat.tech.challenge.oficina.billing.application.messaging.EventPublis
 import com.soat.tech.challenge.oficina.billing.application.messaging.MessageType
 import com.soat.tech.challenge.oficina.billing.application.messaging.OutgoingEvent
 import com.soat.tech.challenge.oficina.billing.application.messaging.PaymentApprovedPayload
+import com.soat.tech.challenge.oficina.billing.application.messaging.PaymentRefundedPayload
 import com.soat.tech.challenge.oficina.billing.application.messaging.PaymentRejectedPayload
 import com.soat.tech.challenge.oficina.billing.domain.exception.NotFoundException
 import com.soat.tech.challenge.oficina.billing.domain.model.Payment
 import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.model.Quote
 import com.soat.tech.challenge.oficina.billing.domain.model.QuoteStatus
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
+import com.soat.tech.challenge.oficina.billing.domain.port.GatewayPaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentCreation
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentGateway
+import com.soat.tech.challenge.oficina.billing.domain.port.PaymentProviderException
 import com.soat.tech.challenge.oficina.billing.domain.port.PaymentRepository
 import com.soat.tech.challenge.oficina.billing.domain.port.QuoteRepository
 import org.slf4j.LoggerFactory
@@ -26,8 +30,24 @@ data class RequestPaymentCommand(
     val workOrderId: UUID,
     val quoteId: UUID,
     val amountCents: Long,
+    /** Trace context of the RequestPayment message, stored with the payment. */
+    val traceContext: TraceContext? = null,
 )
 
+data class RefundPaymentCommand(
+    val workOrderId: UUID,
+    /** Payment known by the orchestrator; when present it must match the payment of the work order. */
+    val paymentId: UUID?,
+    val reason: String?,
+)
+
+/**
+ * Payments driven by saga commands. Both commands run inside the transaction of the message
+ * (processed_message and the effect commit together), so the provider call happens with a database
+ * connection held: the listener consumes one message at a time and the HTTP client has connection
+ * and read timeouts, which bounds that time. The periodic status check, which calls the provider for
+ * many payments, does it outside any transaction (PaymentStatusCheckService).
+ */
 @Service
 class PaymentApplicationService(
     private val quotes: QuoteRepository,
@@ -35,13 +55,14 @@ class PaymentApplicationService(
     private val gateway: PaymentGateway,
     private val events: EventPublisher,
     private val clock: Clock,
+    private val paymentProperties: PaymentProperties,
 ) {
 
     /**
-     * RequestPayment: charges the approved quote through the gateway. APPROVED publishes
-     * PaymentApproved, REJECTED publishes PaymentRejected and PENDING is only stored (a periodic
-     * status check will resolve it). Commands that do not apply to the current state are
-     * logged and discarded.
+     * RequestPayment: charges the approved quote through the gateway with the cardholder name kept
+     * with the approval. APPROVED publishes PaymentApproved, REJECTED publishes PaymentRejected and
+     * PENDING is only stored (the periodic status check resolves it). Commands that do not apply to
+     * the current state are logged and discarded.
      */
     @Transactional
     fun requestPayment(command: RequestPaymentCommand) {
@@ -75,6 +96,7 @@ class PaymentApplicationService(
             provider = gateway.provider,
             correlationId = quote.correlationId,
             now = now(),
+            traceContext = command.traceContext,
         )
         val resolved = if (command.amountCents != quote.totalCents) {
             payment.rejectLocally("Amount ${command.amountCents} differs from quote total ${quote.totalCents}", now())
@@ -84,12 +106,67 @@ class PaymentApplicationService(
         }
         val saved = payments.save(payment)
         log.info(
-            "payment.processed workOrderId={} paymentId={} status={} provider={}",
-            saved.workOrderId, saved.id, saved.status, saved.provider,
+            "payment.processed workOrderId={} paymentId={} status={} provider={} providerPaymentId={}",
+            saved.workOrderId, saved.id, saved.status, saved.provider, saved.providerPaymentId,
         )
         if (resolved) {
-            events.publishAfterCommit(resultEvent(saved))
+            events.publishAfterCommit(paymentResultEvent(saved))
         }
+    }
+
+    /**
+     * RefundPayment (compensation): an approved payment is refunded at the provider, goes to REFUNDED
+     * and PaymentRefunded is published. A payment already refunded publishes PaymentRefunded again
+     * (the orchestrator waits for that confirmation). Any other status, or no payment, is discarded.
+     * A provider failure propagates: the message is retried and then dead-lettered.
+     */
+    @Transactional
+    fun refund(command: RefundPaymentCommand) {
+        val payment = payments.findByWorkOrderId(command.workOrderId)
+        if (payment == null || (command.paymentId != null && command.paymentId != payment.id)) {
+            log.warn(
+                "payment.refund.ignored reason=payment-not-found workOrderId={} paymentId={}",
+                command.workOrderId, command.paymentId,
+            )
+            return
+        }
+        when (payment.status) {
+            PaymentStatus.REFUNDED -> log.info(
+                "payment.refund.confirmed-again workOrderId={} paymentId={}",
+                payment.workOrderId, payment.id,
+            )
+            PaymentStatus.APPROVED -> {
+                val providerPaymentId = payment.providerPaymentId
+                    ?: throw PaymentProviderException("Approved payment ${payment.id} has no provider payment id")
+                val result = gateway.refund(providerPaymentId, payment.amountCents)
+                if (result.status != GatewayPaymentStatus.REFUNDED) {
+                    throw PaymentProviderException(
+                        "Refund of payment ${payment.id} answered ${result.status} (${result.statusDetail})",
+                    )
+                }
+                payment.markRefunded(now(), result.statusDetail)
+                payments.save(payment)
+                log.info(
+                    "payment.refunded workOrderId={} paymentId={} providerPaymentId={} reason={}",
+                    payment.workOrderId, payment.id, providerPaymentId, command.reason,
+                )
+            }
+            else -> {
+                log.warn(
+                    "payment.refund.ignored reason=status-not-refundable workOrderId={} paymentId={} status={}",
+                    payment.workOrderId, payment.id, payment.status,
+                )
+                return
+            }
+        }
+        events.publishAfterCommit(
+            OutgoingEvent(
+                MessageType.PAYMENT_REFUNDED,
+                payment.workOrderId,
+                payment.correlationId,
+                PaymentRefundedPayload(payment.workOrderId, payment.id),
+            ),
+        )
     }
 
     @Transactional(readOnly = true)
@@ -103,41 +180,44 @@ class PaymentApplicationService(
         amountCents = payment.amountCents,
         description = "Oficina - OS ${quote.trackingCode ?: quote.workOrderId}",
         payerEmail = quote.customerEmail,
+        cardholderName = quote.cardholderName ?: paymentProperties.defaultCardholderName,
         // One charge per quote: a redelivered RequestPayment (rolled back after the gateway call)
         // reaches the provider with the same key and does not charge twice.
         idempotencyKey = "quote-${quote.id}",
     )
-
-    private fun resultEvent(payment: Payment): OutgoingEvent = when (payment.status) {
-        PaymentStatus.APPROVED -> OutgoingEvent(
-            MessageType.PAYMENT_APPROVED,
-            payment.workOrderId,
-            payment.correlationId,
-            PaymentApprovedPayload(
-                workOrderId = payment.workOrderId,
-                quoteId = payment.quoteId,
-                paymentId = payment.id,
-                amountCents = payment.amountCents,
-                provider = payment.provider,
-                providerPaymentId = payment.providerPaymentId,
-            ),
-        )
-        else -> OutgoingEvent(
-            MessageType.PAYMENT_REJECTED,
-            payment.workOrderId,
-            payment.correlationId,
-            PaymentRejectedPayload(
-                workOrderId = payment.workOrderId,
-                quoteId = payment.quoteId,
-                paymentId = payment.id,
-                reason = payment.statusDetail ?: "Payment rejected by ${payment.provider}",
-            ),
-        )
-    }
 
     private fun now(): Instant = clock.instant().truncatedTo(ChronoUnit.MILLIS)
 
     private companion object {
         val log = LoggerFactory.getLogger(PaymentApplicationService::class.java)
     }
+}
+
+/** PaymentApproved or PaymentRejected for a payment that has just left PENDING. */
+internal fun paymentResultEvent(payment: Payment): OutgoingEvent = when (payment.status) {
+    PaymentStatus.APPROVED -> OutgoingEvent(
+        MessageType.PAYMENT_APPROVED,
+        payment.workOrderId,
+        payment.correlationId,
+        PaymentApprovedPayload(
+            workOrderId = payment.workOrderId,
+            quoteId = payment.quoteId,
+            paymentId = payment.id,
+            amountCents = payment.amountCents,
+            provider = payment.provider,
+            providerPaymentId = payment.providerPaymentId,
+        ),
+    )
+    PaymentStatus.REJECTED -> OutgoingEvent(
+        MessageType.PAYMENT_REJECTED,
+        payment.workOrderId,
+        payment.correlationId,
+        PaymentRejectedPayload(
+            workOrderId = payment.workOrderId,
+            quoteId = payment.quoteId,
+            paymentId = payment.id,
+            reason = payment.statusDetail ?: "Payment rejected by ${payment.provider}",
+        ),
+    )
+    else -> error("Payment ${payment.id} is ${payment.status}: no result event")
 }

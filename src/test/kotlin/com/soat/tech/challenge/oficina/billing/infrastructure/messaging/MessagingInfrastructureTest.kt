@@ -48,7 +48,7 @@ class MessagingInfrastructureTest {
     // ---------- Topology ----------
 
     @Test
-    fun `topology declares exchanges queues and DLQs with the arguments of the spec`() {
+    fun `topology declares exchanges queues and DLQs with the contract arguments`() {
         val declarables = RabbitTopologyConfiguration().billingTopology()
 
         val exchanges = declarables.getDeclarablesByType(Exchange::class.java).associateBy { it.name }
@@ -109,7 +109,7 @@ class MessagingInfrastructureTest {
     )
 
     @Test
-    fun `without transaction the event is published at once with the envelope of the spec`() {
+    fun `without transaction the event is published at once with the saga envelope`() {
         val sent = slot<Message>()
         every { rabbitTemplate.send("oficina", "event.billing.quote-approved", capture(sent)) } returns Unit
 

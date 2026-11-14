@@ -77,8 +77,9 @@ class PaymentTest {
     @Test
     fun `refund only from approved`() {
         val approved = payment().apply { applyGatewayResult(GatewayPayment("p-1", GatewayPaymentStatus.APPROVED), t0) }
-        approved.markRefunded(t0.plusSeconds(10))
+        approved.markRefunded(t0.plusSeconds(10), "refunded")
         assertEquals(PaymentStatus.REFUNDED, approved.status)
+        assertEquals("refunded", approved.statusDetail)
         assertFailsWith<InvalidStatusTransitionException> { payment().markRefunded(t0) }
     }
 

@@ -3,6 +3,7 @@ package com.soat.tech.challenge.oficina.billing.infrastructure.persistence.jpa
 import com.soat.tech.challenge.oficina.billing.domain.model.LineKind
 import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
 import com.soat.tech.challenge.oficina.billing.domain.model.QuoteStatus
+import com.soat.tech.challenge.oficina.billing.domain.model.TraceContext
 import jakarta.persistence.CollectionTable
 import jakarta.persistence.Column
 import jakarta.persistence.ElementCollection
@@ -91,6 +92,8 @@ class QuoteEntity(
     var totalCents: Long = 0,
     @Column(name = "decision_reason", length = 500)
     var decisionReason: String? = null,
+    @Column(name = "cardholder_name", length = 100)
+    var cardholderName: String? = null,
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.EPOCH,
     @Column(name = "decided_at")
@@ -132,6 +135,13 @@ class PaymentEntity(
     var createdAt: Instant = Instant.EPOCH,
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.EPOCH,
+    // Trace headers (traceparent, tracestate, newrelic) of the RequestPayment message.
+    @Column(name = "trace_parent", length = TraceContext.MAX_VALUE_LENGTH)
+    var traceParent: String? = null,
+    @Column(name = "trace_state", length = TraceContext.MAX_VALUE_LENGTH)
+    var traceState: String? = null,
+    @Column(name = "trace_newrelic", length = TraceContext.MAX_VALUE_LENGTH)
+    var traceNewrelic: String? = null,
     @Version
     var version: Long? = null,
 )

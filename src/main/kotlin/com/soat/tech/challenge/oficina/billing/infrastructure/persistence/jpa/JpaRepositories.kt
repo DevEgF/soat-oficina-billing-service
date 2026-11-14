@@ -1,5 +1,6 @@
 package com.soat.tech.challenge.oficina.billing.infrastructure.persistence.jpa
 
+import com.soat.tech.challenge.oficina.billing.domain.model.PaymentStatus
 import org.springframework.data.jpa.repository.JpaRepository
 import java.util.UUID
 
@@ -17,6 +18,7 @@ interface QuoteJpaRepository : JpaRepository<QuoteEntity, UUID> {
 
 interface PaymentJpaRepository : JpaRepository<PaymentEntity, UUID> {
     fun findByWorkOrderId(workOrderId: UUID): PaymentEntity?
+    fun findAllByStatusOrderByCreatedAtAsc(status: PaymentStatus): List<PaymentEntity>
 }
 
 interface ProcessedMessageJpaRepository : JpaRepository<ProcessedMessageEntity, UUID>

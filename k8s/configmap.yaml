@@ -14,9 +14,13 @@ data:
   SPRING_RABBITMQ_HOST: "rabbitmq"
   SPRING_RABBITMQ_PORT: "5672"
   SPRING_RABBITMQ_USERNAME: "oficina"
-  # Adaptador da porta PaymentGateway. Hoje só existe "simulated" (aprova na hora); o do
-  # Mercado Pago entra depois e usa MERCADOPAGO_ACCESS_TOKEN do Secret.
-  APP_PAYMENT_GATEWAY: "simulated"
+  # Adaptador da porta PaymentGateway: "mercadopago" (API de Orders, modo de teste; credenciais e
+  # cartão de teste no Secret) ou "simulated" (APRO aprova, CONT fica pendente, outro nome recusa).
+  APP_PAYMENT_GATEWAY: "mercadopago"
+  # Intervalo da verificação de pagamentos pendentes no provedor (duração ISO-8601).
+  APP_PAYMENT_STATUS_CHECK_INTERVAL: "PT10S"
+  # E-mail do usuário de teste do Mercado Pago usado como pagador (o provedor exige ...@testuser.com).
+  MERCADOPAGO_PAYER_EMAIL: "test_user_1378758821@testuser.com"
   LOGGING_STRUCTURED_FORMAT_CONSOLE: "logstash"
   # Agente Java do New Relic: só liga se NEW_RELIC_LICENSE_KEY (Secret) não estiver vazio.
   NEW_RELIC_APP_NAME: "oficina-billing-service"
@@ -24,6 +28,8 @@ data:
   NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: "true"
   NEW_RELIC_APPLICATION_LOGGING_ENABLED: "true"
   NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED: "true"
+  # Logs encaminhados levam o MDC (requestId, sagaId, messageType, messageId) como atributos.
+  NEW_RELIC_APPLICATION_LOGGING_FORWARDING_CONTEXT_DATA_ENABLED: "true"
   NEW_RELIC_APPLICATION_LOGGING_LOCAL_DECORATING_ENABLED: "false"
   NEW_RELIC_ATTRIBUTES_EXCLUDE: "request.parameters.*,request.headers.*,response.headers.*,cpf,authorization,password"
   NEW_RELIC_TRANSACTION_TRACER_RECORD_SQL: "off"

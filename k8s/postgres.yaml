@@ -1,4 +1,4 @@
-# Banco exclusivo do OS Service. A senha é a mesma chave que a aplicação usa
+# Banco exclusivo do Billing Service. A senha é a mesma chave que a aplicação usa
 # (SPRING_DATASOURCE_PASSWORD do Secret billing-service-secrets).
 apiVersion: v1
 kind: Service

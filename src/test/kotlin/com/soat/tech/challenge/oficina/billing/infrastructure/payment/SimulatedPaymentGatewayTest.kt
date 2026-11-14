@@ -14,30 +14,53 @@ class SimulatedPaymentGatewayTest {
 
     private val gateway = SimulatedPaymentGateway()
 
-    private fun creation(key: String) = PaymentCreation(
+    private fun creation(key: String, cardholderName: String = "APRO") = PaymentCreation(
         paymentId = UUID.randomUUID(),
         workOrderId = UUID.randomUUID(),
         quoteId = UUID.randomUUID(),
         amountCents = 21000,
         description = "Oficina - OS X",
         payerEmail = null,
+        cardholderName = cardholderName,
         idempotencyKey = key,
     )
 
     @Test
-    fun `approves at once with the SIMULATED provider`() {
+    fun `APRO approves at once with the SIMULATED provider`() {
         val payment = gateway.create(creation("quote-1"))
 
         assertEquals("SIMULATED", gateway.provider)
         assertEquals(GatewayPaymentStatus.APPROVED, payment.status)
         assertTrue(payment.providerPaymentId.startsWith("sim-"))
         assertEquals(payment, gateway.getStatus(payment.providerPaymentId))
+        assertEquals(GatewayPaymentStatus.APPROVED, gateway.create(creation("quote-lower", " apro ")).status)
+    }
+
+    @Test
+    fun `CONT stays pending until settled`() {
+        val payment = gateway.create(creation("quote-1", "CONT"))
+
+        assertEquals(GatewayPaymentStatus.PENDING, payment.status)
+        assertEquals(GatewayPaymentStatus.PENDING, gateway.getStatus(payment.providerPaymentId).status)
+
+        val settled = gateway.settle(payment.providerPaymentId, GatewayPaymentStatus.APPROVED, "accredited")
+        assertEquals(GatewayPaymentStatus.APPROVED, settled.status)
+        assertEquals(settled, gateway.getStatus(payment.providerPaymentId))
+        assertFailsWith<IllegalStateException> { gateway.settle(payment.providerPaymentId, GatewayPaymentStatus.REJECTED) }
+    }
+
+    @Test
+    fun `any other cardholder name is rejected with the name as reason`() {
+        val payment = gateway.create(creation("quote-1", "OTHE"))
+
+        assertEquals(GatewayPaymentStatus.REJECTED, payment.status)
+        assertEquals("OTHE", payment.statusDetail)
     }
 
     @Test
     fun `same idempotency key returns the same charge`() {
         val first = gateway.create(creation("quote-1"))
-        assertEquals(first, gateway.create(creation("quote-1")))
+        assertEquals(first, gateway.create(creation("quote-1", "OTHE")))
         assertNotEquals(first.providerPaymentId, gateway.create(creation("quote-2")).providerPaymentId)
     }
 
@@ -55,5 +78,6 @@ class SimulatedPaymentGatewayTest {
     fun `unknown charge is not found`() {
         assertFailsWith<NotFoundException> { gateway.getStatus("sim-unknown") }
         assertFailsWith<NotFoundException> { gateway.refund("sim-unknown", 1) }
+        assertFailsWith<NotFoundException> { gateway.settle("sim-unknown", GatewayPaymentStatus.APPROVED) }
     }
 }
